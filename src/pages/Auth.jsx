@@ -295,7 +295,7 @@ export default function Auth() {
             <div className="flex justify-center mt-2">
 
               <ReCAPTCHA
-                sitekey="6LcDMYosAAAAAGw0eq4kndmN8rskqSTVZszITGZr"
+                sitekey={import.meta.env.VITE_CAPTCHA_SITE_KEY}
                 onChange={(value)=>setCaptcha(value)}
               />
 
