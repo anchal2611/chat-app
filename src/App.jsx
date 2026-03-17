@@ -74,4 +74,11 @@ element={
 </div>
 
 );
+
+useEffect(()=>{
+if(Notification.permission !== "granted"){
+Notification.requestPermission();
+}
+},[]);
+
 }

@@ -16,180 +16,230 @@ export default function MessageInput({
   selectedChat
 }) {
 
-const fileRef = useRef();
-const mediaRecorderRef = useRef();
+  const fileRef = useRef();
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const startTimeRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
 
-const [showEmoji,setShowEmoji] = useState(false);
-const [recording,setRecording] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [recording, setRecording] = useState(false);
 
-const chunksRef = useRef([]);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [audioPreview, setAudioPreview] = useState(null);
 
+  /* ================= IMAGE ================= */
 
-// IMAGE UPLOAD
-const handleImage = (e)=>{
+  const handleImage = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-const file = e.target.files[0];
-if(!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImage(reader.result);
+      setImagePreview(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
 
-const reader = new FileReader();
+  /* ================= VOICE ================= */
 
-reader.onloadend = ()=>{
-setImage(reader.result);
-};
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-reader.readAsDataURL(file);
+      streamRef.current = stream;
 
-};
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
 
+      chunksRef.current = [];
+      startTimeRef.current = Date.now();
 
-// VOICE RECORD START
-const startRecording = async ()=>{
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
 
-const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      mediaRecorder.onstop = () => {
 
-const mediaRecorder = new MediaRecorder(stream);
+        const duration = Date.now() - startTimeRef.current;
 
-mediaRecorderRef.current = mediaRecorder;
+        if (duration < 500) {
+          alert("Hold mic longer 🎤");
+          return;
+        }
 
-chunksRef.current = [];
+        const blob = new Blob(chunksRef.current, {
+          type: "audio/webm"
+        });
 
-mediaRecorder.ondataavailable = (e)=>{
-chunksRef.current.push(e.data);
-};
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setAudio(reader.result);
+          setAudioPreview(reader.result);
+        };
+        reader.readAsDataURL(blob);
 
-mediaRecorder.onstop = ()=>{
+        streamRef.current.getTracks().forEach(track => track.stop());
+      };
 
-const blob = new Blob(chunksRef.current,{type:"audio/webm"});
+      mediaRecorder.start(200);
+      setRecording(true);
 
-const reader = new FileReader();
+    } catch (err) {
+      alert("Mic permission denied");
+    }
+  };
 
-reader.onloadend = ()=>{
-setAudio(reader.result);
-};
+  const stopRecording = () => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+    }
+    setRecording(false);
+  };
 
-reader.readAsDataURL(blob);
+  /* ================= TYPING ================= */
 
-};
+  const handleTyping = async (value) => {
 
-mediaRecorder.start();
-setRecording(true);
+    setText(value);
 
-};
+    if (!selectedChat || !auth.currentUser) return;
 
+    await updateDoc(doc(db, "chats", selectedChat.id), {
+      [`typing.${auth.currentUser.uid}`]: true
+    });
 
-// VOICE RECORD STOP
-const stopRecording = ()=>{
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
 
-if(mediaRecorderRef.current){
-mediaRecorderRef.current.stop();
-}
+    typingTimeoutRef.current = setTimeout(async () => {
+      await updateDoc(doc(db, "chats", selectedChat.id), {
+        [`typing.${auth.currentUser.uid}`]: false
+      });
+    }, 1200);
+  };
 
-setRecording(false);
+  /* ================= EMOJI ================= */
 
-};
+  const handleEmoji = (emoji) => {
+    handleTyping(text + emoji.native);
+  };
 
+  /* ================= SEND ================= */
 
-// TYPING DETECTION
-const handleTyping = async (value)=>{
+  const handleSend = async () => {
 
-setText(value);
+    if (!text.trim() && !imagePreview && !audioPreview) return;
 
-if(!selectedChat) return;
+    await sendMessage();
 
-await updateDoc(
-doc(db,"chats",selectedChat.id),
-{
-[`typing.${auth.currentUser.uid}`]: true
-}
-);
+    setImagePreview(null);
+    setAudioPreview(null);
 
-};
+    if (selectedChat && auth.currentUser) {
+      await updateDoc(doc(db, "chats", selectedChat.id), {
+        [`typing.${auth.currentUser.uid}`]: false
+      });
+    }
+  };
 
+  /* ================= UI ================= */
 
-// ENTER KEY SEND
-const handleKey = (e)=>{
+  return (
+    <div className="relative">
 
-if(e.key==="Enter"){
-sendMessage();
-}
+      {/* 🔥 PREVIEW */}
+      {(imagePreview || audioPreview) && (
+        <div className="p-3 bg-black/40 border-b border-white/10 flex items-center gap-4">
 
-};
+          {/* IMAGE */}
+          {imagePreview && (
+            <div className="relative">
+              <img
+                src={imagePreview}
+                className="w-24 h-24 object-cover rounded-lg"
+              />
+              <button
+                onClick={() => {
+                  setImagePreview(null);
+                  setImage(null);
+                }}
+                className="absolute -top-2 -right-2 bg-red-500 text-white text-xs px-2 rounded-full"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
+          {/* AUDIO */}
+          {audioPreview && (
+            <div className="flex items-center gap-2">
+              <audio controls src={audioPreview} />
+              <button
+                onClick={() => {
+                  setAudioPreview(null);
+                  setAudio(null);
+                }}
+                className="text-red-400 text-xs"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
-return(
+        </div>
+      )}
 
-<div className="relative">
+      {/* EMOJI */}
+      {showEmoji && (
+        <div className="absolute bottom-16 left-20 z-50">
+          <Picker data={data} onEmojiSelect={handleEmoji} theme="dark" />
+        </div>
+      )}
 
-{/* EMOJI PICKER */}
+      {/* INPUT BAR */}
+      <div className="h-16 border-t border-white/10 flex items-center px-4 gap-4">
 
-{showEmoji && (
-<div className="absolute bottom-16 left-20 z-50">
-<Picker
-data={data}
-onEmojiSelect={(emoji)=>setText(prev => prev + emoji.native)}
-theme="dark"
-/>
-</div>
-)}
+        <input
+          type="file"
+          accept="image/*"
+          ref={fileRef}
+          onChange={handleImage}
+          className="hidden"
+        />
 
-<div className="h-16 border-t border-white/10 flex items-center px-4 gap-4">
+        <Paperclip onClick={() => fileRef.current.click()} />
 
-{/* FILE INPUT */}
+        <input
+          value={text}
+          onChange={(e) => handleTyping(e.target.value)}
+          className="flex-1 bg-white/5 rounded px-4 py-2 outline-none"
+        />
 
-<input
-type="file"
-accept="image/*"
-ref={fileRef}
-onChange={handleImage}
-className="hidden"
-/>
+        <Smile onClick={() => setShowEmoji(!showEmoji)} />
 
-<Paperclip
-className="cursor-pointer"
-onClick={()=>fileRef.current.click()}
-/>
+        {recording ? (
+          <>
+            <span className="text-red-500 text-sm">Recording...</span>
+            <button onClick={stopRecording}>Stop</button>
+          </>
+        ) : (
+          <Mic onClick={startRecording} />
+        )}
 
+        <button
+          onClick={handleSend}
+          className="bg-purple-500 px-4 py-2 rounded-lg"
+        >
+          Send
+        </button>
 
-{/* MESSAGE INPUT */}
-
-<input
-value={text}
-onChange={(e)=>handleTyping(e.target.value)}
-onKeyDown={handleKey}
-className="flex-1 bg-white/5 rounded px-4 py-2 outline-none"
-placeholder="Type a message..."
-/>
-
-
-{/* EMOJI BUTTON */}
-
-<Smile
-className="cursor-pointer"
-onClick={()=>setShowEmoji(!showEmoji)}
-/>
-
-
-{/* VOICE RECORD */}
-
-<Mic
-className={`cursor-pointer ${recording ? "text-red-500":""}`}
-onMouseDown={startRecording}
-onMouseUp={stopRecording}
-/>
-
-
-{/* SEND BUTTON */}
-
-<button
-onClick={sendMessage}
-className="bg-purple-500 px-4 py-2 rounded-lg"
->
-Send
-</button>
-
-</div>
-
-</div>
-
-);
+      </div>
+    </div>
+  );
 }
